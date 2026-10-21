@@ -8,7 +8,17 @@ const pdfURL=(name,page)=>'./pdf/'+encodeURIComponent(name)+(page?'#page='+page:
 function pageOf(q){const m=(q.reference||'').match(/s\.\s*(\d+)\s*PDF/i);return m?+m[1]:null}
 function btn(text,style,handler){const b=document.createElement('button');b.textContent=text;b.className=style||'';b.onclick=handler;$('actions').append(b)}
 function updateMetrics(){$('lawCount').textContent=laws.length;$('metricLaws').textContent=laws.length;$('metricExam').textContent=exams.length;$('metricDocs').textContent=sources.length+4;$('metricKnown').textContent=Object.values(progress).filter(v=>v==='known').length}
-function switchMode(m){mode=m;document.querySelectorAll('.navbtn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));document.querySelectorAll('.exam-filter').forEach(e=>e.hidden=m!=='exam');$('source').disabled=m==='exam';filter()}
+// Każdy tryb zapamiętuje własne wyszukiwanie. Filtr fiszek nie ogranicza testów ABC.
+const searchByMode={law:'',exam:'',write:'',review:'',library:''};
+function switchMode(m){
+ searchByMode[mode]=$('search').value;
+ mode=m;
+ $('search').value=searchByMode[m]||'';
+ document.querySelectorAll('.navbtn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+ document.querySelectorAll('.exam-filter').forEach(e=>e.hidden=m!=='exam');
+ $('source').disabled=m==='exam';
+ filter();
+}
 function filter(reset=true){if(reset)idx=0;revealed=false;graded=false;selected=new Set();let pool=mode==='exam'?exams:mode==='review'?[...laws,...exams].filter(q=>progress[key(q)]==='missed'):laws;
  const src=$('source').value,term=$('search').value.trim().toLocaleLowerCase('pl');
  pool=pool.filter(q=>{if(src!=='all'&&q.source!==src)return false;if(mode==='exam'&&$('part').value!=='all'&&q.part!==$('part').value)return false;if(mode==='exam'&&$('status').value!=='all'&&q.status!==$('status').value)return false;return !term||[q.front,q.back,q.question,q.reference,q.topic,q.note,q.legal,...Object.values(q.options||{})].join(' ').toLocaleLowerCase('pl').includes(term)});
@@ -17,6 +27,15 @@ function next(){idx=Math.min(idx+1,list.length);revealed=false;graded=false;sele
 function prev(){idx=Math.max(0,idx-1);revealed=false;graded=false;selected.clear();render()}
 function mark(v){const q=list[idx];if(!q)return;progress[key(q)]=v;save();updateMetrics();next()}
 function sourceLink(q){return q.source?`<p class="ref">Źródło: ${escapeHTML(q.topic||q.source)} · ${escapeHTML(q.reference||'')} · <a href="${pdfURL(q.source,pageOf(q))}" target="_blank" rel="noopener">Otwórz PDF ↗</a></p>`:''}
+function askChatGPT(q){
+ const question=q.front||q.question||'';
+ const answer=q.back||(q.answer||[]).join(', ');
+ const prompt=`Pomóż mi zrozumieć tę fiszkę z aplikacji GeoFiszki, przygotowanej do egzaminu na uprawnienia geologiczne V i VII.\n\nFiszka: ${question}\nOdpowiedź: ${answer}\nŹródło: ${q.topic||''}; ${q.reference||q.legal||''}; ${q.source||''}.\n\nWyjaśnij konkretnie, sprawdź podstawę prawną i wyjątki. Nie zakładaj, że odpowiedź z fiszki jest poprawna. Zadaj mi pytanie, co jest dla mnie niejasne.`;
+ const url='https://chatgpt.com/?q='+encodeURIComponent(prompt);
+ // Kopia pytania pozostaje dostępna, gdy ChatGPT nie obsłuży parametru w URL.
+ if(navigator.clipboard?.writeText)navigator.clipboard.writeText(prompt).catch(()=>{});
+ const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.click();
+}
 function render(){const card=$('card');$('actions').replaceChildren();$('modeLabel').textContent=({law:'SZYBKIE FISZKI',exam:'TESTY ABC',write:'ODPOWIEDŹ WŁASNA',review:'POWTÓRKI',library:'BIBLIOTEKA PDF'})[mode];$('heading').textContent=({law:'Sprawdź, co pamiętasz',exam:'Pytania egzaminacyjne',write:'Odpowiedz własnymi słowami',review:'Wróć do trudnych zagadnień',library:'Dokumenty źródłowe'})[mode];
  if(mode==='library'){renderLibrary();return}
  $('position').textContent=list.length?`${Math.min(idx+1,list.length)} / ${list.length}`:'0 / 0';$('progressFill').style.width=(list.length?100*Math.min(idx,list.length)/list.length:0)+'%';
@@ -31,7 +50,7 @@ function render(){const card=$('card');$('actions').replaceChildren();$('modeLab
  }else{
   card.innerHTML=`<span class="tag">${escapeHTML(q.topic||'ZAGADNIENIE')} ${mode==='write'?'· ĆWICZENIE PISEMNE':''}</span><h3>${escapeHTML(q.front||q.question)}</h3>${mode==='write'?'<label for="written">Twoja odpowiedź (opcjonalnie)</label><textarea class="answer-input" id="written" placeholder="Wpisz odpowiedź, jeśli chcesz poćwiczyć formułowanie przepisów..."></textarea>':''}${revealed?`<div class="answer">${escapeHTML(q.back||('Klucz: '+(q.answer||[]).join(', ')))}</div>${sourceLink(q)}`:'<p class="muted">Przypomnij sobie odpowiedź i odsłoń ją jednym kliknięciem.</p>'}`;
   if(!revealed)btn('Pokaż odpowiedź','primary',()=>{revealed=true;const typed=$('written')?.value||'';render();if(typed){const p=document.createElement('p');p.className='ref';p.textContent='Twoja odpowiedź: '+typed;card.append(p)}});
-  else{btn('Do powtórki','bad',()=>mark('missed'));btn('Znam ✓','good',()=>mark('known'))}
+  else{btn('Do powtórki','bad',()=>mark('missed'));btn('Znam ✓','good',()=>mark('known'));btn('Zapytaj ChatGPT ↗','',()=>askChatGPT(q))}
  }
  btn('← Poprzednia','',prev);btn('Pomiń →','',next)
 }
